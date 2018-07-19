@@ -13,7 +13,7 @@ output:
 ---
 
 ```{r env_ready, echo = F, warning = F, message = F}
-pacman::p_load(knitr, tidyverse, tidyr, ggplot2, data.table, caret, magrittr, lubridate, MLmetrics)
+pacman::p_load(knitr, tidyverse, tidyr, ggplot2, data.table, caret, magrittr, lubridate, MLmetrics, gencve)
 opts_chunk$set(fig.path = "output/figure/", fig.align = "center", out.width = "90%", warning = F, message = F)
 
 data_path = "data/"
@@ -38,7 +38,7 @@ pre_d <- d %>%
   mutate_at(vars(store, item, month, wday), as.factor) %>% 
   select(-date)
 
-index <- createDataPartition(pre_d$sales, p = .8, list = F)
+index <- createDataPartition(pre_d$sales, p = .7, list = F)
 train <- pre_d %>% extract(index, )
 test <- pre_d %>% extract(-index, )
 ```
@@ -48,8 +48,8 @@ test <- pre_d %>% extract(-index, )
 ## Modeling
 
 ```{r Modeling}
-fitControl <- trainControl(method = "repeatedcv", number = 10, repeats = 3, allowParallel = TRUE)
-mlMethods <- c("glm", "simpls", "rpart", "pcr", "kknn", "glmnet", "lasso", "ridge")
+fitControl <- trainControl(method = "repeatedcv", number = 5, repeats = 2, allowParallel = TRUE)
+mlMethods <- c("rpart", "pcr", "xgbLinear", "gbm")
 models <- mlMethods %>% 
   lapply(function(x) train(sales ~ ., data = train, method = x, trControl = fitControl))
 ```
@@ -72,7 +72,7 @@ evaluate <- function(model, testset, class, ylim = c(1, testset %>% pull(class) 
     geom_line(size = .3, alpha = .7) + 
     ggtitle(model$modelInfo$label, 
             paste0("process time : ", model$times$everything, " / ", 
-                   "RMSE : ", RMSE(predict(model, newdata = testset) %>% unlist, pull(testset, class))))
+                   "SMAPE : ", smape(pull(testset, class), predict(model, newdata = testset) %>% unlist)))
   p
 }
 ```
@@ -82,10 +82,19 @@ models %>%
   lapply(evaluate, test, "sales")
 
 bestModel <- models %>% 
-  lapply(function(x) RMSE(predict(x, newdata = test) %>% unlist, pull(test, sales))) %>% 
+  lapply(function(x) smape(pull(test, sales), predict(x, newdata = test) %>% unlist)) %>% 
   unlist %>% 
   order %>% extract(1) %>% 
   extract2(models, .)
+```
+
+<br><br>
+
+## Full training on selected best model machine learning algorithm
+
+```{r}
+selectedMethod <- bestModel$method
+bestModel <- train(sales ~ ., data = pre_d, method = selectedMethod, trControl = fitControl)
 ```
 
 <br><br>
@@ -107,7 +116,7 @@ predY <- realTest %>%
 ```{r Output_submission}
 submissionSet <- paste0(data_path, "sample_submission.csv") %>% 
   fread %>% 
-  mutate(count = predY)
+  mutate(sales = predY)
 
 write_csv(submissionSet, "output/submission.csv")
 ```
